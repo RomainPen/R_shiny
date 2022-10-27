@@ -1,0 +1,943 @@
+#Import the dataset
+library('tidyverse') #read the database
+hostel <- data.table::fread("C:/Users/P?nichon/Desktop/M2_TIDE/Pre_rentr?e/R_SQL(R)/Projet/Hostel.csv")
+
+#convert all text columns to Lowercase :
+library("dplyr")
+hostel <-hostel %>% 
+  mutate(across(where(is.character), tolower))
+
+
+
+glimpse(hostel) #type of each columns
+'''
+Explain all covariate :
+V1 (int) = Row num
+hostel.name(chr) = Hostel Name
+City(chr) = City name where hostel is located in
+price.from(int) = Minimum Price for 1 night stay
+Distance(chr) = Distance from city center (km)
+summary.score(dbl) = Summary score of ratings
+rating.band(chr) = Rating band
+atmosphere(dbl) = Rating score of atmosphere
+cleanliness(dbl) = Rating score of cleanliness
+facilities(dbl) = Rating score of facilities
+location.y(dbl) = Rating score of location
+security(dbl) = Rating score of security
+staff(dbl) = Rating score of staff
+valueformoney(dbl) = Rating score of value for money
+lon(dbl) = Longitude
+lat(dbl) = Latitude
+'''
+
+
+
+#1/ Pre-processing and imputation for each variable :
+
+#1.1/ Analyse(how is possible to encode ? or have we to drop it ?) and Setting some variables (take only the numerics value) :
+
+#V1 : Drop this columns
+hostel <- select(hostel,-c(V1))
+
+#hostel.name : Don't Drop it 
+#hostel <- select(hostel,-c(hostel.name))
+
+#City : Encode by the "latitude and longitude" (drop it later)
+
+#price.from (target) : don't touch
+
+#Distance : change type (from chr -> dbl)
+library(stringr)
+#pour r?cup?rer uniquement la distance (du centre-ville) on remplace les caract?res par du vide et on convertit caract?re en num?rique
+hostel <- hostel %>% mutate(Distance = as.numeric(str_replace(hostel$Distance,"km from city centre","")))
+glimpse(hostel) #on verifie si la var distance est bien un dbl
+
+#summary.score : don't touch
+
+#rating.band : encode by summary.score, don't drop it because we will use it for the machine learning pre-processing
+unique(hostel$rating.band)
+
+#atmosphere,cleanliness, facilities, location.y, security, staff, valueformoney, lon, lat : don't touch
+
+
+#1.2/ Looking for the columns which has missing values
+library(Hmisc) #librairie permettant d'obtenir des statistiques descriptives
+describe(hostel) 
+'''
+summary.score : 15 missing values
+rating.band : 15
+atmosphere : 15
+cleanliness : 15
+facilities : 15
+location.y : 15
+security : 15
+staff : 15
+valueformoney : 15
+lon : 44
+lat : 44
+'''
+
+#****************************************************imputation*******************************************
+'''faire des groupes ?chantillon pour distance(=group_distance), ex: 5 si hotel est entre 4.5 et 5.5 km du centre ville
+summary.score : 15 missing values, impute group_by(city) et group_by(group_distance) 
+rating.band : 15 impute by summary.score
+atmosphere : 15 , impute group_by(city) et group_by(group_distance) 
+cleanliness : 15 , impute group_by(city) et group_by(group_distance) 
+facilities : 15 , impute group_by(city) et group_by(group_distance) 
+location.y : 15 , impute group_by(city) et group_by(group_distance) 
+security : 15 , impute group_by(city) et group_by(group_distance) 
+staff : 15 , impute group_by(city) et group_by(group_distance) 
+valueformoney : 15 , impute group_by(city) et group_by(group_distance) 
+lon : 44 , impute group_by(city) et group_by(group_distance) 
+lat : 44 , impute group_by(city) et group_by(group_distance) 
+'''
+
+#Categories or round the Distance : 
+library(dplyr) 
+hostel$Distance_round <- round(hostel$Distance)
+
+
+
+
+#Resolve the pb of missing values :
+
+#summary.score : substitute NA by the median by city (and by the distance, optional)
+library(scales)
+library(dplyr) 
+hostel <- hostel %>%
+  group_by(City) %>%
+  group_by(Distance_round) %>%
+  mutate_at(vars(summary.score),~ifelse(is.na(.x), median(.x, na.rm = TRUE), .x))
+  
+
+#rating.band : 
+library(stringr)
+hostel$rating.band <- as.factor(ifelse(hostel$summary.score>=9, 'superb',
+                                       ifelse(hostel$summary.score < 9 & hostel$summary.score >= 8, 'fabulous',
+                                              ifelse(hostel$summary.score < 8 & hostel$summary.score >= 7, 'very good',
+                                                     ifelse(hostel$summary.score < 7 & hostel$summary.score >= 6, 'good',
+                                                            ifelse(hostel$summary.score<6, 'rating', 'NA'))))))
+
+
+
+#atmosphere : #cleanliness : #facilities : #location.y : #security : #staff : #valueformoney :
+hostel <- hostel %>%
+  group_by(City) %>%
+  group_by(Distance_round) %>%
+  mutate_at(vars(atmosphere),~ifelse(is.na(.x), median(.x, na.rm = TRUE), .x)) %>%
+  mutate_at(vars(cleanliness),~ifelse(is.na(.x), median(.x, na.rm = TRUE), .x)) %>%
+  mutate_at(vars(facilities),~ifelse(is.na(.x), median(.x, na.rm = TRUE), .x)) %>%
+  mutate_at(vars(location.y),~ifelse(is.na(.x), median(.x, na.rm = TRUE), .x)) %>%
+  mutate_at(vars(security),~ifelse(is.na(.x), median(.x, na.rm = TRUE), .x)) %>%
+  mutate_at(vars(staff),~ifelse(is.na(.x), median(.x, na.rm = TRUE), .x)) %>%
+  mutate_at(vars(valueformoney),~ifelse(is.na(.x), median(.x, na.rm = TRUE), .x))
+
+#lon : il y a 2 Na, est-ce qu'on les laisses, ou est ce qu'on en fait qlq chose ? Si on en fait qlq chose, il y a un risque de biais!
+#or try to create a model
+hostel <- hostel %>%
+  group_by(City) %>%
+  group_by(Distance_round) %>%
+  mutate_at(vars(lon),~ifelse(is.na(.x), median(.x, na.rm = TRUE), .x))
+
+#lat : il y a 2 Na, est-ce qu'on les laisses, ou est ce qu'on en fait qlq chose ? Si on en fait qlq chose, il y a un risque de biais!
+hostel <- hostel %>%
+  group_by(City) %>%
+  group_by(Distance_round) %>%
+  mutate_at(vars(lat),~ifelse(is.na(.x), median(.x, na.rm = TRUE), .x))
+
+#Verify if there is the Na in the dataframe :
+describe(hostel)
+
+
+#Export the df(hostel) to excel :
+install.packages("writexl")
+library("writexl")
+write_xlsx(hostel,"C:\\Users\\P?nichon\\Desktop\\M2_TIDE\\Pre_rentr?e\\R_SQL(R)\\Projet\\hostel_imputation.xlsx")
+
+#Export the df to csv
+write_csv(hostel,"C:\\Users\\P?nichon\\Desktop\\M2_TIDE\\Pre_rentr?e\\R_SQL(R)\\Projet\\hostel_imputation.xlsx")
+
+
+
+
+#************************************************************************************************************************
+
+#2/ Descriptive analyse of hostel_imputation :
+
+#1ere facon de lire le dataset :
+library("readxl")
+# xls files
+hostel_imputation <- read_excel("C:\\Users\\P?nichon\\Desktop\\M2_TIDE\\Pre_rentr?e\\R_SQL(R)\\Projet\\hostel_imputation.xlsx")
+hostel_imputation<- as.data.frame(hostel_imputation)
+
+
+#2e facon de lire le dataset (plus pertinent) VERIFIER SI LES CODES FINCTIONNE TJRS BIEN !!!!!!!!!!!!!!!!!!!!
+library('tidyverse')
+# xls files
+hostel_imputation <- data.table::fread("C:/Users/P?nichon/Desktop/M2_TIDE/Pre_rentr?e/R_SQL(R)/Projet/hostel_imputation.csv")
+hostel_imputation <- as_tibble(hostel_imputation)
+
+
+###1/ Determinate the type of variable 
+#qualitative : ordinale or nominale
+#quantitative : continue or discrete 
+'''
+hostel.name(chr) = Quali nominal
+City(chr) = Quali nominal
+price.from(int) = Quant continue
+Distance(dbl) = Quant continue
+summary.score(dbl) = Quant continue
+rating.band(chr) = Quali ordinal
+atmosphere(dbl) = Quant continue
+cleanliness(dbl) = Quant continue
+facilities(dbl) = Quant continue
+location.y(dbl) = Quant continue
+security(dbl) = Quant continue
+staff(dbl) = Quant continue
+valueformoney(dbl) = Quant continue
+lon(dbl) = Quant continue
+lat(dbl) = Quant continue
+Distance_round(int) = Quant discrete
+'''
+
+###2/ Analyse missing value (Ariane) (optionnel)
+
+
+###3/Global analysis :
+summary(hostel_imputation)
+library(Hmisc)
+describe(hostel_imputation)
+library(funModeling)
+df_status(hostel_imputation)
+
+###4*/ detect the outliers : outliers if hostel_imputation$atmosphere > Q3 - 1.5*IQR or Q3 + 1.5*IQR
+
+"""
+Que faire une fois qu'on a d?tect? des outliers ?
+Cette question est effectivement une pr?occupation majeure apr?s l'identification des valeurs aberrantes. 
+Dans le cas du traitement de signal que j'ai ?voqu? rapidement (lorsque les signaux unidimensionnels ou 
+multidimensionnels sont liss?s), la question n'est plus trop pertinente car l'objectif n'est pas de d?tecter les 
+valeurs aberrantes mais plut?t de filtrer les jeux de donn?es. Lorsque les valeurs aberrantes sont rep?r?es, deux 
+sc?narios sont possibles : les valeurs aberrantes peuvent ?tre supprim?es ou corrig?es. L'?limination des valeurs 
+aberrantes est brutale mais instantan?e. Toutefois, la taille du jeu de donn?es peut ?tre consid?rablement r?duite 
+si on se trouve en pr?sence d'une grande quantit? de valeurs aberrantes. C'est ?galement critiquable si les m?thodes 
+de d?tection aberrantes ne sont pas robustes. Par exemple, si le taux de faux positifs est important, 
+c'est-?-dire qu'un objet est identifi? ? tort comme ?tant une valeur aberrante, la suppression des valeurs 
+aberrantes entra?nera la suppression d'observations pertinentes. La correction d'une valeur aberrante est un 
+probl?me plus complexe. Il est effectivement possible d'utiliser le voisinage d'une observation ou certains 
+patrons/motifs g?n?raux dans les donn?es pour modifier la valeur d'une observation aberrante, mais ces m?thodes 
+sont susceptibles d'ajouter du bruit dans les jeux de donn?es si on ne fait pas ce travail avec beaucoup de 
+pr?caution. Une possibilit? de correction serait de remplacer une valeur aberrante par le r?sultat d'une 
+interpolation ? partir d'objets voisins. Mais on prend ? ce moment-l? le risque de lisser les informations de 
+notre jeu de donn?es, il faut en ?tre conscient.
+
+So, why identifying the extreme values is important? Because, it can drastically bias/change the fit estimates 
+and predictions. Let me illustrate this using the cars dataset.
+
+How did we treat it ?
+We decide to don't drop all outliers because some outliers can exist and it's important to study them.
+"""
+
+
+###4/ Analyse for each variable :
+
+#function for quantitative analysis :
+install.packages( pkgs = "summarytools")
+library(psych)
+library(summarytools)
+library("stringr") 
+library(scales)
+library(dplyr)
+library(funModeling)
+library("ggpubr")
+library(raster)
+library(fmsb)
+
+
+quant_analysis <- function(data_var, var_name, histo, boxp, summ, plot){
+  #frequence : 
+  if (histo==1){
+    hist <- hist(data_var, 
+                 col = c("skyblue"),
+                 main = paste(str_c("Histogramme of the variable", var_name, sep=' ')),
+                 ylab = "Effectifs",
+                 xlab = var_name)
+    return(hist)
+  }
+  #Position setting :
+  #boxplot 
+  if (boxp==1){
+    boxplot <- boxplot(data_var, col = c("skyblue"),main = str_c("Boxplot of the variable",var_name, sep=' '), ylab = var_name)
+    return(boxplot)}
+  #summary :
+  if (summ==1){
+    summtools <- summarytools::descr(data_var)
+    return(summtools)}
+  #dispersion setting :
+  #Filled Density Plot
+  if (plot==1){
+    d <- density(data_var)
+    plot_d <- plot(d, main=str_c("Kernel Density of", var_name, sep=' ')) + polygon(d, col="skyblue", border="red")
+    return(plot_d)}
+}
+
+
+"""***********************Rename all columns in all function**************************************"""
+
+##City :
+#effectif :
+table_city <- table(hostel_imputation$City)
+#proportion :
+prop.table(table_city) 
+#Barplot
+library(funModeling)
+summarytools::freq(hostel_imputation$City) 
+funModeling::freq(hostel_imputation$City, plot=TRUE) #INTERFACE ET RAPPORT
+'''mettre city ? la place de var. et expliquer le graph'''
+
+
+
+'''ajouter une explication des boxplot'''
+##price.from : 
+#gestion des Outliers :
+summarytools::descr(hostel_imputation$price.from)
+boxplot(hostel_imputation$price.from, col = c("skyblue"),main = "Boxplot", ylab = "Quantiles") #voir s'il y a des outliers #RAPPORT
+
+#manage some price.from's outliers :
+'''
+We drop some observation which price.from are <= as 10000 because we prefer to study only the basic hostel which price are between 0 and 10000.
+We deduce than sample of studying could be the basics hostels, and the hight price hostels could be the luxuries hostels.
+'''
+hostel_imputation<-hostel_imputation[hostel_imputation$price.from <= 10000,]
+
+#frequence : On a une distribution qui suit une loi normale
+quant_analysis(data_var=hostel_imputation$price.from, var_name='price.from', histo=1, boxp=0, summ=0, plot=0) #RAPPORT
+#Position setting :
+#boxplot 
+quant_analysis(data_var=hostel_imputation$price.from, var_name='price.from', histo=0, boxp=1, summ=0, plot=0) #RAPPORT ET INTERFACE
+#summary :
+quant_analysis(data_var=hostel_imputation$price.from, var_name='price.from', histo=0, boxp=0, summ=1, plot=0) #RAPPORT 
+#dispersion setting :
+#Filled Density Plot (ne fonctionne pas car valeur manquantes)
+quant_analysis(data_var=hostel_imputation$price.from, var_name='price.from', histo=0, boxp=0, summ=0, plot=1) #RAPPORT ?
+
+
+
+
+##Distance :
+summarytools::descr(hostel_imputation$Distance)
+
+#frequence 
+quant_analysis(data_var=hostel_imputation$Distance, var_name='Distance', histo=1, boxp=0, summ=0, plot=0)
+#Position setting :
+#summary :
+quant_analysis(data_var=hostel_imputation$Distance, var_name='Distance', histo=0, boxp=0, summ=1, plot=0)
+#boxplot 
+quant_analysis(data_var=hostel_imputation$Distance, var_name='Distance', histo=0, boxp=1, summ=0, plot=0)
+#dispersion setting :
+#Filled Density Plot
+quant_analysis(data_var=hostel_imputation$Distance, var_name='Distance', histo=0, boxp=0, summ=0, plot=1)
+
+
+
+
+##summary.score : 
+summarytools::descr(hostel_imputation$summary.score)
+#frequence 
+quant_analysis(data_var=hostel_imputation$summary.score, var_name='summary.score', histo=1, boxp=0, summ=0, plot=0)
+#Position setting :
+#summary :
+quant_analysis(data_var=hostel_imputation$summary.score, var_name='summary.score', histo=0, boxp=0, summ=1, plot=0)
+#boxplot 
+quant_analysis(data_var=hostel_imputation$summary.score, var_name='summary.score', histo=0, boxp=1, summ=0, plot=0)
+#dispersion setting :
+#Filled Density Plot
+quant_analysis(data_var=hostel_imputation$summary.score, var_name='summary.score', histo=0, boxp=0, summ=0, plot=1)
+
+
+
+
+##rating.band :
+#effectif :
+table_city <- table(hostel_imputation$rating.band)
+#proportion :
+prop.table(table_city)
+#Barplot
+library(funModeling)
+summarytools::freq(hostel_imputation$rating.band)
+funModeling::freq(hostel_imputation$rating.band, plot=TRUE)
+
+
+
+
+##atmosphere : 
+summarytools::descr(hostel_imputation$atmosphere)
+#frequence 
+quant_analysis(data_var=hostel_imputation$atmosphere, var_name='atmosphere', histo=1, boxp=0, summ=0, plot=0)
+#Position setting :
+#summary :
+quant_analysis(data_var=hostel_imputation$atmosphere, var_name='atmosphere', histo=0, boxp=0, summ=1, plot=0)
+#boxplot 
+quant_analysis(data_var=hostel_imputation$atmosphere, var_name='atmosphere', histo=0, boxp=1, summ=0, plot=0)
+#dispersion setting :
+#Filled Density Plot
+quant_analysis(data_var=hostel_imputation$atmosphere, var_name='atmosphere', histo=0, boxp=0, summ=0, plot=1)
+
+
+
+##cleanliness :
+summarytools::descr(hostel_imputation$cleanliness)
+#frequence 
+quant_analysis(data_var=hostel_imputation$cleanliness, var_name='cleanliness', histo=1, boxp=0, summ=0, plot=0)
+#Position setting :
+#summary :
+quant_analysis(data_var=hostel_imputation$cleanliness, var_name='cleanliness', histo=0, boxp=0, summ=1, plot=0)
+#boxplot 
+quant_analysis(data_var=hostel_imputation$cleanliness, var_name='cleanliness', histo=0, boxp=1, summ=0, plot=0)
+#dispersion setting :
+#Filled Density Plot
+quant_analysis(data_var=hostel_imputation$cleanliness, var_name='cleanliness', histo=0, boxp=0, summ=0, plot=1)
+
+
+
+
+##facilities : 
+summarytools::descr(hostel_imputation$facilities)
+#frequence
+quant_analysis(data_var=hostel_imputation$facilities, var_name='facilities', histo=1, boxp=0, summ=0, plot=0)
+#Position setting :
+#summary :
+quant_analysis(data_var=hostel_imputation$facilities, var_name='facilities', histo=0, boxp=0, summ=1, plot=0)
+#boxplot 
+quant_analysis(data_var=hostel_imputation$facilities, var_name='facilities', histo=0, boxp=1, summ=0, plot=0)
+#dispersion setting :
+#Filled Density Plot
+quant_analysis(data_var=hostel_imputation$facilities, var_name='facilities', histo=0, boxp=0, summ=0, plot=1)
+
+
+
+
+##location.y : 
+summarytools::descr(hostel_imputation$location.y)
+#frequence
+quant_analysis(data_var=hostel_imputation$location.y, var_name='location.y', histo=1, boxp=0, summ=0, plot=0)
+#Position setting :
+#summary :
+quant_analysis(data_var=hostel_imputation$location.y, var_name='location.y', histo=0, boxp=0, summ=1, plot=0)
+#boxplot 
+quant_analysis(data_var=hostel_imputation$location.y, var_name='location.y', histo=0, boxp=1, summ=0, plot=0)
+#dispersion setting :
+#Filled Density Plot
+quant_analysis(data_var=hostel_imputation$location.y, var_name='location.y', histo=0, boxp=0, summ=0, plot=1)
+
+
+
+
+##security : 
+summarytools::descr(hostel_imputation$security)
+#frequence
+quant_analysis(data_var=hostel_imputation$security, var_name='security', histo=1, boxp=0, summ=0, plot=0)
+#Position setting :
+#summary :
+quant_analysis(data_var=hostel_imputation$security, var_name='security', histo=0, boxp=0, summ=1, plot=0)
+#boxplot 
+quant_analysis(data_var=hostel_imputation$security, var_name='security', histo=0, boxp=1, summ=0, plot=0)
+#dispersion setting :
+#Filled Density Plot
+quant_analysis(data_var=hostel_imputation$security, var_name='security', histo=0, boxp=0, summ=0, plot=1)
+
+
+
+
+##staff : 
+summarytools::descr(hostel_imputation$staff)
+#frequence
+quant_analysis(data_var=hostel_imputation$staff, var_name='staff', histo=1, boxp=0, summ=0, plot=0)
+#Position setting :
+#summary :
+quant_analysis(data_var=hostel_imputation$staff, var_name='staff', histo=0, boxp=0, summ=1, plot=0)
+#boxplot 
+quant_analysis(data_var=hostel_imputation$staff, var_name='staff', histo=0, boxp=1, summ=0, plot=0)
+#dispersion setting :
+#Filled Density Plot
+quant_analysis(data_var=hostel_imputation$staff, var_name='staff', histo=0, boxp=0, summ=0, plot=1)
+
+
+
+##valueformoney : 
+summarytools::descr(hostel_imputation$valueformoney)
+#frequence
+quant_analysis(data_var=hostel_imputation$valueformoney, var_name='valueformoney', histo=1, boxp=0, summ=0, plot=0)
+#Position setting :
+#summary :
+quant_analysis(data_var=hostel_imputation$valueformoney, var_name='valueformoney', histo=0, boxp=0, summ=1, plot=0)
+#boxplot 
+quant_analysis(data_var=hostel_imputation$valueformoney, var_name='valueformoney', histo=0, boxp=1, summ=0, plot=0)
+#dispersion setting :
+#Filled Density Plot
+quant_analysis(data_var=hostel_imputation$valueformoney, var_name='valueformoney', histo=0, boxp=0, summ=0, plot=1)
+
+
+
+##lon : 
+summarytools::descr(hostel_imputation$lon)
+boxplot(hostel_imputation$lon, col = c("skyblue"),main = "Boxplot", ylab = "Quantiles")
+
+#gestion des outliers (drop, may be a measurement error) 
+#longitude max du japon : 154? 
+#longitude min du japon :123? 
+hostel_imputation$lon[hostel_imputation$lon <= 122 | hostel_imputation$lon >= 155] <- NA 
+#Impute lon variable :
+hostel_imputation <- hostel_imputation %>%
+  group_by(City) %>%
+  mutate_at(vars(lon),~ifelse(is.na(.x), median(.x, na.rm = TRUE), .x))
+
+#frequence
+quant_analysis(data_var=hostel_imputation$lon, var_name='lon', histo=1, boxp=0, summ=0, plot=0)
+#Position setting :
+#summary :
+quant_analysis(data_var=hostel_imputation$lon, var_name='lon', histo=0, boxp=0, summ=1, plot=0)
+#boxplot 
+quant_analysis(data_var=hostel_imputation$lon, var_name='lon', histo=0, boxp=1, summ=0, plot=0)
+#dispersion setting :
+#Filled Density Plot (ne fonctionne pas, car il y a des valeurs manquantes)
+quant_analysis(data_var=hostel_imputation$lon, var_name='lon', histo=0, boxp=0, summ=0, plot=1)
+
+
+
+
+##lat : 
+summarytools::descr(hostel_imputation$lat)
+boxplot(hostel_imputation$lat, col = c("skyblue"),main = "Boxplot", ylab = "Quantiles")
+
+#gestion outliers (drop)
+#longitude max du japon : 46? 
+#longitude min du japon : 20? 
+hostel_imputation$lat[hostel_imputation$lat <= 19 | hostel_imputation$lat >= 47] <- NA
+#Impute lat variable :
+hostel_imputation <- hostel_imputation %>%
+  group_by(City) %>%
+  mutate_at(vars(lat),~ifelse(is.na(.x), median(.x, na.rm = TRUE), .x))
+
+#frequence
+quant_analysis(data_var=hostel_imputation$lat, var_name='lat', histo=1, boxp=0, summ=0, plot=0)
+#Position setting :
+#summary :
+quant_analysis(data_var=hostel_imputation$lat, var_name='lat', histo=0, boxp=0, summ=1, plot=0)
+#boxplot 
+quant_analysis(data_var=hostel_imputation$lat, var_name='lat', histo=0, boxp=1, summ=0, plot=0)
+#dispersion setting :
+#Filled Density Plot (ne fonctionne pas, car il y a des valeurs manquantes)
+quant_analysis(data_var=hostel_imputation$lat, var_name='lat', histo=0, boxp=0, summ=0, plot=1)
+
+
+
+
+##Distance_round :
+summarytools::descr(hostel_imputation$Distance_round)
+#frequence
+quant_analysis(data_var=hostel_imputation$Distance_round, var_name='Distance_round', histo=1, boxp=0, summ=0, plot=0)
+funModeling::freq(hostel_imputation$Distance_round, plot=TRUE) #better for quant discrete   #RAPPORT ET INTERFACE
+#Position setting :
+#summary :
+quant_analysis(data_var=hostel_imputation$Distance_round, var_name='Distance_round', histo=0, boxp=0, summ=1, plot=0)
+#boxplot 
+quant_analysis(data_var=hostel_imputation$Distance_round, var_name='Distance_round', histo=0, boxp=1, summ=0, plot=0)
+#dispersion setting :
+#Filled Density Plot
+quant_analysis(data_var=hostel_imputation$Distance_round, var_name='Distance_round', histo=0, boxp=0, summ=0, plot=1)
+
+
+
+
+##5/analyse NA :
+library(Hmisc) 
+df_status(hostel_imputation)
+'''
+No missing value  !
+'''
+
+
+
+###6 / analyse the relation between variable :
+
+##Une quantitative, une qualitative
+
+"""
+Le package ? psych ? permet de calculer les statistiques pr?sent?es par la fonction describe() 
+(contenue par d?faut dans R). Elles sont (dans l'ordre) :
+
+Le nombre d'observations
+la moyenne
+l'?cart-type
+la m?diane
+la moyenne tronqu?e (calcul?e en enlevant les 5 plus petites et 5 plus grandes valeurs)
+la d?viation absolue ? la m?diane
+le minimum
+le maximum
+l'?tendue (minimum-maximum)
+le coefficient d'assiym?trie (skew)
+la Kurtosis
+le standard error.
+"""
+
+##group_by City
+#basic stat :
+install.packages("psych")
+library(psych)
+describeBy(hostel_imputation, group=hostel_imputation$City) #RAPPORT ?
+#boxplot :
+boxplot_groupby <- function(a,b = hostel_imputation$City, ylab, xlab){ 
+  res <- boxplot(a ~ b,
+                 col = c("skyblue"),
+                 main = paste(str_c("Boxplot for variable", ylab, "by", xlab, sep=' ')),
+                 ylab = ylab, xlab = xlab)
+  return(res)
+}
+
+#RAPPORT ET INTERFACE : FOR ALL
+boxplot_groupby(a = hostel_imputation$price.from, b = hostel_imputation$City, ylab='price.from', xlab="City")
+boxplot_groupby(a = hostel_imputation$Distance, ylab='Distance', xlab="City")
+boxplot_groupby(a = hostel_imputation$summary.score, ylab='summary.score', xlab="City")
+boxplot_groupby(a = hostel_imputation$atmosphere, ylab='atmosphere', xlab="City")
+boxplot_groupby(a = hostel_imputation$cleanliness, ylab='cleanliness', xlab="City")
+boxplot_groupby(a = hostel_imputation$facilities, ylab='facilities', xlab="City")
+boxplot_groupby(a = hostel_imputation$location.y, ylab='location.y', xlab="City")
+boxplot_groupby(a = hostel_imputation$security, ylab='security', xlab="City")
+boxplot_groupby(a = hostel_imputation$staff, ylab='staff', xlab="City")
+boxplot_groupby(a = hostel_imputation$valueformoney, ylab='valueformoney', xlab="City")
+
+#test of difference significativity: RAPPORT 
+'''Explication : voir sur le site '
+anova <- function(a,b=hostel_imputation$City){ 
+  anova <- aov(a ~ b, data=hostel_imputation)
+  return(summary(anova))
+}
+anova(a = hostel_imputation$price.from, b = hostel_imputation$City)
+anova(a = hostel_imputation$Distance) #drop 
+anova(a = hostel_imputation$summary.score)
+
+
+#1
+#Choose the best city(min or max) : #appronfondir, mettre en output le df d'hotel les mieux au moins biens not?s
+library("dplyr")
+best_city <- function(var,data, min, max){ 
+  best_city <- data %>%                                        
+    group_by(City) %>%                        
+    summarise_at(vars(var), list(median = median)) %>%
+    arrange(median)
+  if (max == 1){
+    return(apply(best_city, 2, FUN=max))}
+  if (min == 1){
+    return(apply(best_city, 2, FUN=min))
+  }
+}
+
+best_city(var='valueformoney',data=hostel_imputation, min=0, max=1) #RAPPORT ET INTERFACE
+
+
+#1.1
+#foresee the budget by City : 
+library("dplyr")
+choice_city <- function(city, var,data){
+  hostel_imputation_ <- data %>%  filter(price.from <= 12750)
+  
+  mean_budget <- hostel_imputation_ %>%                                        
+    group_by(City) %>%                        
+    summarise_at(vars(var), list(median = median)) %>%
+    arrange(median)
+  if (city == 'fukuoka-city'){
+    return(subset(mean_budget,City=='fukuoka-city'))}
+  if (city == 'hiroshima'){
+    return(subset(mean_budget,City=='hiroshima'))}
+  if (city == 'kyoto'){
+    return(subset(mean_budget,City=='kyoto'))}
+  if (city == 'osaka'){
+    return(subset(mean_budget,City=='osaka'))}
+  if (city == 'tokyo'){
+    return(subset(mean_budget,City=='tokyo'))}
+}
+
+choice_city(city='osaka', var='price.from',data=hostel_imputation) #RAPPORT ET INTERFACE
+
+
+#1.2
+#show the best hostel in your favorite city by variable (for : not rating.band, lon, lat )
+best_hostel_in_city <- function(data, data_var, decrease, city){
+  best_hostel <- data[order(data_var,decreasing = decrease), ] 
+  best_hostel <- best_hostel %>% 
+    filter(City == city)
+}
+b_h_i_c<-best_hostel_in_city(data=hostel_imputation, data_var=hostel_imputation$price.from, decrease=FALSE, city='osaka') #INTERFACE et RAPPORT
+
+
+#1.3
+#combine best_city and best_hostel_in_city : (for :not Distance, rating.band, lon, lat, Distance_round)
+best_hostel_in_best_city <- function(var,data, min, max, data_var, all){
+  #best hostel in best city :
+  #funct1
+  if(all==FALSE) {
+    best_city <- data%>%
+      group_by(City) %>%                        
+      summarise_at(vars(var), list(median = median)) %>%
+      arrange(median)
+    #best_city
+    if (max == 1){
+      b_c <- apply(best_city, 2, FUN=max)
+      decrease <- TRUE}
+    if (min == 1){
+      b_c <- apply(best_city, 2, FUN=min)
+      decrease <- FALSE}
+    #funct2
+    best_hostel <- data[order(data_var,decreasing = decrease), ] 
+    best_hostel <- best_hostel %>% 
+      filter(City == str_c(b_c[1]))
+    return(best_hostel)}
+  
+  #best hostel in Japan :
+  if (all ==TRUE) {
+    best_city <- data
+    #best_city
+    if (max == 1){
+      decrease <- TRUE}
+    if (min == 1){
+      decrease <- FALSE}
+    #funct2
+    best_hostel <- data[order(data_var,decreasing = decrease), ] 
+    return(best_hostel)}
+}
+
+b_h_i_b_c<-best_hostel_in_best_city(var='cleanliness',data=hostel_imputation, min=0, max=1, data_var=hostel_imputation$cleanliness, all=FALSE) #INTERFACE ET RAPPPORT
+
+
+
+#Spider chart and bar plot for 1 city :
+ind_spider_chart <- function(data, city, spider_chart){
+  library(fmsb)
+  hostel_imputation2<- subset(data, select=c(City, atmosphere, cleanliness, facilities, location.y, security, staff, valueformoney))
+  hostel_imputation2 <- as.data.frame(hostel_imputation2)
+  b <- hostel_imputation2 %>% group_by(City) %>% summarise_all(funs(mean))
+  b<- as.data.frame(b)
+  b_<-b[b$City == city,] 
+  b_ <- rbind(rep(10,5) , rep(0,5) , b_)
+  rownames(b_) <- NULL
+  
+  if(spider_chart==TRUE){
+    radarchart(b_[,2:8], axistype=1, title = str_c(city,'(6 to 10)', sep=' '), plwd=3, plty=1 ,cglcol="grey", cglty=1, axislabcol="black", caxislabels=seq(6,10,1), cglwd=0.8, vlcex=0.8, pcol='skyblue')
+  }
+  
+  if(spider_chart == FALSE){
+    b_[,2:8] %>% slice(3) %>% t() %>% as.data.frame() %>% add_rownames() %>% arrange(V1) %>% mutate(rowname=factor(rowname, rowname)) %>%
+      ggplot( aes(x=rowname, y=V1)) +
+      geom_segment( aes(x=rowname ,xend=rowname, y=0, yend=V1), color="grey") +
+      geom_point(size=5, color="skyblue") +
+      coord_flip() +
+      
+      theme(
+        panel.grid.minor.y = element_blank(),
+        panel.grid.major.y = element_blank(),
+        axis.text = element_text( size=12 ),
+        legend.position="none"
+      ) +
+      ylim(7,10) +
+      ylab(city) +
+      xlab("")
+  }
+}
+ind_spider_chart(data=hostel_imputation, city='hiroshima', spider_chart=TRUE) #RAPPORT (spider)
+
+
+
+
+#all spider chart :
+all_spider_chart <- function(){
+  library(fmsb)
+  hostel_imputation2<- subset(hostel_imputation, select=c(City, atmosphere, cleanliness, facilities, location.y, security, staff, valueformoney))
+  hostel_imputation2 <- as.data.frame(hostel_imputation2)
+  b <- hostel_imputation2 %>% group_by(City) %>% summarise_all(funs(median))
+  b<- as.data.frame(b)
+  b <- rbind(rep(10,10) , rep(6,10) , b)
+  # Prepare color
+  library(colormap)
+  colors_border=colormap(colormap=colormaps$viridis, nshades=6, alpha=1)
+  colors_in=colormap(colormap=colormaps$viridis, nshades=6, alpha=0.3)
+  
+  # Prepare title
+  mytitle <- c("Fukuoka-city", "Hiroshima", "Kyoto", "Osaka", "Tokyo")
+  
+  # Split the screen in 6 parts
+  par(mar=rep(0.8,4))
+  par(mfrow=c(2,3))
+  
+  # Loop for each plot
+  for(i in 1:5){
+    # Custom the radarChart !
+    radarchart( b[c(1,2,i+2),2:8], axistype=1,
+                #custom polygon
+                pcol=colors_border[i] , pfcol=colors_in[i] , plwd=4, plty=1 , 
+                #custom the grid
+                cglcol="grey", cglty=1, axislabcol="grey", caxislabels=seq(6,10,1), cglwd=0.8,
+                #custom labels
+                vlcex=0.9,
+                #title
+                title=mytitle[i]
+    )
+    if(i==5){break}}
+}
+all_spider_chart() #INTERFACE ET RAPPORT
+
+
+
+
+
+##group_by rating.band '''don't take it''    #IDEM que group_by city (juste RAPPORT)
+#basic stat :
+install.packages("psych")
+library(psych)
+describeBy(hostel_imputation, group=hostel_imputation$rating.band)
+#boxplot : 
+boxplot_groupby(a = hostel_imputation$price.from, b=hostel_imputation$rating.band, ylab='price.from', xlab="rating.band")
+boxplot_groupby(a = hostel_imputation$Distance, b=hostel_imputation$rating.band, ylab='Distance', xlab="rating.band")
+boxplot_groupby(a = hostel_imputation$summary.score, b=hostel_imputation$rating.band, ylab='summary.score', xlab="rating.band")
+boxplot_groupby(a = hostel_imputation$atmosphere, b=hostel_imputation$rating.band, ylab='atmosphere', xlab="rating.band")
+boxplot_groupby(a = hostel_imputation$cleanliness, b=hostel_imputation$rating.band, ylab='cleanliness', xlab="rating.band")
+boxplot_groupby(a = hostel_imputation$facilities, b=hostel_imputation$rating.band, ylab='facilities', xlab="rating.band")
+boxplot_groupby(a = hostel_imputation$location.y, b=hostel_imputation$rating.band, ylab='location.y', xlab="rating.band")
+boxplot_groupby(a = hostel_imputation$security, b=hostel_imputation$rating.band, ylab='security', xlab="rating.band")
+boxplot_groupby(a = hostel_imputation$staff, b=hostel_imputation$rating.band, ylab='staff', xlab="rating.band")
+boxplot_groupby(a = hostel_imputation$valueformoney, b=hostel_imputation$rating.band, ylab='valueformoney', xlab="rating.band")
+
+#test of difference significativity:
+anova(a = hostel_imputation$price.from)
+anova(a = hostel_imputation$Distance)
+
+
+
+
+##Deux variables qualitatives : 
+#tableau
+table_City_rating<-table(hostel_imputation$rating.band,hostel_imputation$City)
+prop.table(table_City_rating, 2) #RAPPORT ?
+#test d'ind?pendance :
+chisq.test(hostel_imputation$rating.band,hostel_imputation$City) #RAPPORT
+
+
+
+
+##Deux variables quantitative : 
+#correlation between 2 variables :
+
+#fonction for correlation squatter plot :
+library("ggpubr")
+corr_scatt_plot <- function(x, y, data, city){
+  if (city == 'all') {
+    hostel_imputation_ <- data  %>% filter(price.from <= 12750)}
+  if (city != 'all') {
+    hostel_imputation_ <- data  %>% filter(price.from <= 12750) %>% filter(City == city)}
+  ggscatter(hostel_imputation_, x = x, y = y, 
+            add = "reg.line", conf.int = TRUE, 
+            cor.coef = TRUE, cor.method = "pearson",
+            xlab = x, ylab = y)
+}
+
+#price.from and Distance : #RAPPORT ET INTERFACE
+#correlation and scatter plot
+corr_scatt_plot(x="Distance", y='price.from', data=hostel_imputation, city='all') 
+
+#price.from and cleanliness :
+#correlation and scatter plot
+corr_scatt_plot(x="cleanliness", y='price.from', data=hostel_imputation, city='all')
+
+#price.from and summary.score :
+#correlation and scatter plot
+corr_scatt_plot(x="summary.score", y='price.from', data=hostel_imputation, city='all')
+
+#Distance and summary.score :
+#correlation and scatter plot
+corr_scatt_plot(x="summary.score", y='Distance', data=hostel_imputation, city='all')
+
+
+#Corr between all numeric variable :
+#fonction for correlation plot : 
+library(psych)
+corr_plot <- function(data, city){
+  if (city == 'all') {
+    hostel_imputation_ <- data  %>% filter(price.from <= 12750)
+    }
+  if (city != 'all') {
+    hostel_imputation_ <- data  %>% filter(price.from <= 12750) %>% filter(City == city)
+  }
+  corPlot(hostel_imputation_[, unlist(lapply(hostel_imputation_, is.numeric))], cex = 1, 
+          scale = FALSE, stars = TRUE)
+}
+
+corr_plot(data=hostel_imputation, city="all") #RAPPORT ET INTERFACE
+
+#do the same with city's name !
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#********************************************************************************
+#3/ ML:
+
+"""Data pre-processing"""
+
+##Impute missing values : not NA (we impute it in step 2/)
+library(Hmisc) 
+df_status(hostel_imputation)
+
+
+##HANDLE OUTLIERS :
+"""
+How did we treat it ?
+Drop the outliers which are <= 3* (Q3 + 1.5*(Q3-Q1)) and >= 3* (Q3 - 1.5*(Q3-Q1)) :
+"""
+
+#price.from : Outliers (drop, because there are few outliers) 
+"""
+We drop the price which are <= as (3 * (Q3 + 1.5*(Q3-Q1)) = 12750), because there are an extreme outliers
+for the data pre-processing of machine learning, we prefer to drop all the rows, because it's 
+inconsistant to remplace these extreme outliers by the max of boxplot and we can't create a random 
+value without consistant explanation
+"""
+hostel_imputation<-hostel_imputation[hostel_imputation$price.from <= 12750,]
+
+#for the rest of value, we don't have to drop it because the result are possible to exist.
+
+
+##Encode the qualitatives variable :
+
+#City : We use One-hot-encoder :
+
+
+
+
+
+
+
+
+
+
+
+

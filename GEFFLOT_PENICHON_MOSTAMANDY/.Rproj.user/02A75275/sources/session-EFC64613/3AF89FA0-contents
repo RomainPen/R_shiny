@@ -1,0 +1,856 @@
+
+#Import librairies
+library(shiny)
+library(bslib)
+library(tidyverse)
+library(plotly)
+library(tidyquant)
+library(leaflet)
+library(DT)
+
+
+library(psych)
+library(summarytools)
+library("stringr") 
+library(scales)
+library(dplyr)
+library(funModeling)
+library("ggpubr")
+library(raster)
+library(fmsb)
+library(Hmisc)
+library(colormap)
+library(V8)
+library(ggplot2)
+
+# Import data
+hostel <- data.table::fread("C:/Users/Pénichon/Desktop/M2_TIDE/Pre_rentree/R_SQL(R)/Projet/hostel_imputation_VF.csv")
+hostel<- as_tibble(hostel)
+
+hostel_map <- data.table::fread("C:/Users/Pénichon/Desktop/M2_TIDE/Pre_rentree/R_SQL(R)/Projet/hostel_imputation_map.csv")
+
+hostel <- hostel[,-16]
+
+colnames(hostel) <- c("Hostel_Name", "City", "Price", "Distance", "Summary_Score", "Rating_Band", "Atmosphere", "Cleanliness", "Facilities", "Location", "Security", "Staff", "Value_For_Money", "lon", "lat")
+rating <- subset( hostel, select = c("Summary_Score", "Atmosphere", "Cleanliness", "Facilities", "Location", "Security", "Staff", "Value_For_Money", "City"))
+var_best_city <- subset( hostel, select = c("Summary_Score","Atmosphere", "Cleanliness", "Facilities", "Security", "Value_For_Money"))
+var_cheapest <- subset( hostel, select = c("Price"))
+
+# Theme
+my_theme <- bs_theme(bg = "#ffff ", fg = "#113580 ", primary = "#113580 ")
+
+# ******************************************************FUNCTION*****************************************************
+
+# Functions for server :
+
+#DESCRIPTIVE ANALYSIS****************************************************************************
+
+#1/ One variable analysis :
+
+#1.1/ For quantitatives variable :
+quant_analysis <- function(data_var, var_name, histo, boxp, summ, plot){
+  #frequence : 
+  if (histo==1){
+    hist <- hist(data_var, 
+                 col = c("skyblue"),
+                 main = paste(str_c("Histogramme of the variable", var_name, sep=' ')),
+                 ylab = "Effectifs",
+                 xlab = var_name)
+    return(hist)
+  }
+  #Position setting :
+  #boxplot 
+  if (boxp==1){
+    boxplot <- boxplot(data_var, col = c("skyblue"),main = str_c("Boxplot of the variable",var_name, sep=' '), ylab = var_name)
+    return(boxplot)}
+  #summary :
+  if (summ==1){
+    summtools <- summarytools::descr(data_var)
+    return(summtools)}
+  #dispersion setting :
+  #Filled Density Plot
+  if (plot==1){
+    d <- density(data_var)
+    plot_d <- plot(d, main=str_c("Kernel Density of", var_name, sep=' ')) + polygon(d, col="skyblue", border="red")
+    return(plot_d)}
+}
+
+#2/ quali and quanti variables analysis (group_by City and Rating_Band):
+
+#2.1/group_by City :
+#boxplot :
+boxplot_groupby <- function(a,b = hostel$City, ylab, xlab){ 
+  res <- boxplot(a ~ b,
+                 col = c("skyblue"),
+                 main = paste(str_c("Boxplot for variable", ylab, "by", xlab, sep=' ')),
+                 ylab = ylab, xlab = xlab)
+  return(res)
+}
+
+#Spider chart and bar plot for 1 city :
+ind_spider_chart <- function(data, city, spider_chart){
+  library(fmsb)
+  hostel_imputation2<- subset(data, select=c(City, Atmosphere, Cleanliness, Facilities, Location, Security, Staff, Value_For_Money))
+  hostel_imputation2 <- as.data.frame(hostel_imputation2)
+  b <- hostel_imputation2 %>% group_by(City) %>% summarise_all(funs(mean))
+  b<- as.data.frame(b)
+  b_<-b[b$City == city,] 
+  b_ <- rbind(rep(10,5) , rep(0,5) , b_)
+  rownames(b_) <- NULL
+  
+  if(spider_chart==TRUE){
+    radarchart(b_[,2:8], axistype=1, title = str_c(city,'(6 to 10)', sep=' '), plwd=3, plty=1 ,cglcol="grey", cglty=1, axislabcol="black", caxislabels=seq(6,10,1), cglwd=0.8, vlcex=0.8, pcol='skyblue')
+  }
+  
+  if(spider_chart == FALSE){
+    b_[,2:8] %>% slice(3) %>% t() %>% as.data.frame() %>% add_rownames() %>% arrange(V1) %>% mutate(rowname=factor(rowname, rowname)) %>%
+      ggplot( aes(x=rowname, y=V1)) +
+      geom_segment( aes(x=rowname ,xend=rowname, y=0, yend=V1), color="grey") +
+      geom_point(size=5, color="skyblue") +
+      coord_flip() +
+      
+      theme(
+        panel.grid.minor.y = element_blank(),
+        panel.grid.major.y = element_blank(),
+        axis.text = element_text( size=12 ),
+        legend.position="none"
+      ) +
+      ylim(7,10) +
+      ylab(city) +
+      xlab("")
+  }
+}
+
+
+#all spider chart :
+all_spider_chart <- function(){
+  library(fmsb)
+  hostel_imputation2<- subset(hostel, select=c(City, Atmosphere, Cleanliness, Facilities, Location, Security, Staff, Value_For_Money))
+  hostel_imputation2 <- as.data.frame(hostel_imputation2)
+  b <- hostel_imputation2 %>% group_by(City) %>% summarise_all(funs(median))
+  b<- as.data.frame(b)
+  b <- rbind(rep(10,10) , rep(6,10) , b)
+  # Prepare color
+  library(colormap)
+  colors_border=colormap(colormap=colormaps$viridis, nshades=6, alpha=1)
+  colors_in=colormap(colormap=colormaps$viridis, nshades=6, alpha=0.3)
+  
+  # Prepare title
+  mytitle <- c("Fukuoka-city", "Hiroshima", "Kyoto", "Osaka", "Tokyo")
+  
+  # Split the screen in 6 parts
+  par(mar=rep(0.8,4))
+  par(mfrow=c(2,3))
+  
+  # Loop for each plot
+  for(i in 1:5){
+    # Custom the radarChart !
+    radarchart( b[c(1,2,i+2),2:8], axistype=1,
+                #custom polygon
+                pcol=colors_border[i] , pfcol=colors_in[i] , plwd=4, plty=1 , 
+                #custom the grid
+                cglcol="grey", cglty=1, axislabcol="grey", caxislabels=seq(6,10,1), cglwd=0.8,
+                #custom labels
+                vlcex=0.9,
+                #title
+                title=mytitle[i]
+    )
+    if(i==5){break}}
+}
+
+
+#4/ 2 quanti var :
+
+#correlation plot between 2 variables :
+#correlation squatter plot :
+library("ggpubr")
+corr_scatt_plot <- function(x, y, data, city){
+  if (city == 'all') {
+    hostel_imputation_ <- data }
+  if (city != 'all') {
+    hostel_imputation_ <- data  %>% filter(City == city)}
+  ggscatter(hostel_imputation_, x = x, y = y, 
+            add = "reg.line", conf.int = TRUE, 
+            cor.coef = TRUE, cor.method = "pearson",
+            xlab = x, ylab = y)
+}
+
+#Corr matrix between all numeric variable :
+#correlation matrix : 
+library(psych)
+corr_plot <- function(data, city){
+  if (city == 'all') {
+    hostel_imputation_ <- data  
+  }
+  if (city != 'all') {
+    hostel_imputation_ <- data  %>% filter(City == city)
+  }
+  corPlot(hostel_imputation_[, unlist(lapply(hostel_imputation_, is.numeric))], cex = 1, 
+          scale = FALSE, stars = TRUE)
+}
+
+
+#RESEARCH BAR*****************************************************************************************
+#1/ qualit and quanti :
+
+#1.1/Group_by City
+
+#Choose the best city(min or max) : #appronfondir, mettre en output le df d'hotel les mieux au moins biens notés
+
+best_city <- function(var,data, min, max){
+  best_city <- data %>%
+    group_by(City) %>%
+    summarise_at(vars(var), list(median = median)) %>%
+    arrange(median)
+  if (max == 1){
+    return(apply(best_city, 2, FUN=max))}
+  if (min == 1){
+    return(apply(best_city, 2, FUN=min))
+  }
+}
+bc<-best_city(var='Summary_Score',data=hostel, min=0, max=1) #RAPPORT ET INTERFACE
+bc
+
+#foresee the budget by City : 
+
+choice_city <- function(city, var,data){
+  hostel_imputation_ <- data
+
+  mean_budget <- hostel_imputation_ %>%
+    group_by(City) %>%
+    summarise_at(vars(var), list(median = median)) %>%
+    arrange(median)
+  if (city == 'fukuoka-city'){
+    return(subset(mean_budget,City=='fukuoka-city'))}
+  if (city == 'hiroshima'){
+    return(subset(mean_budget,City=='hiroshima'))}
+  if (city == 'kyoto'){
+    return(subset(mean_budget,City=='kyoto'))}
+  if (city == 'osaka'){
+    return(subset(mean_budget,City=='osaka'))}
+  if (city == 'tokyo'){
+    return(subset(mean_budget,City=='tokyo'))}
+}
+
+
+#show the best hostel in your favorite city by variable (for : not rating.band, lon, lat )
+
+best_hostel_in_city <- function(data, data_var, decrease, city){
+  best_hostel <- data[order(data_var,decreasing = decrease), ]
+  best_hostel <- best_hostel %>%
+    filter(City == city)
+}
+
+
+#combine best_city and best_hostel_in_city : (for :not Distance, rating.band, lon, lat, Distance_round)
+
+best_hostel_in_best_city <- function(var,data, min, max, data_var, all){
+  #best hostel in best city :
+  #funct1
+  if(all==FALSE) {
+    best_city <- data%>%
+      group_by(City) %>%
+      summarise_at(vars(var), list(median = median)) %>%
+      arrange(median)
+    #best_city
+    if (max == 1){
+      b_c <- apply(best_city, 2, FUN=max)
+      decrease <- TRUE}
+    if (min == 1){
+      b_c <- apply(best_city, 2, FUN=min)
+      decrease <- FALSE}
+    #funct2
+    best_hostel <- data[order(data_var,decreasing = decrease), ]
+    best_hostel <- best_hostel %>%
+      filter(City == str_c(b_c[1]))
+    return(best_hostel)}
+
+  #best hostel in Japan :
+  if (all ==TRUE) {
+    best_city <- data
+    #best_city
+    if (max == 1){
+      decrease <- TRUE}
+    if (min == 1){
+      decrease <- FALSE}
+    #funct2
+    best_hostel <- data[order(data_var,decreasing = decrease), ]
+    return(best_hostel)}
+}
+
+
+
+
+
+
+#***********************************************************************************************************
+# USER INTERFACE
+ui <- fluidPage(navbarPage(title = "Japanese Hostel", theme = my_theme, position = "static-top", 
+                 
+                 # Information
+                 tabPanel("Information",
+                          icon = icon("fa-solid fa-circle-info",verify_fa = FALSE), align="center",
+                          headerPanel(h3("Welcome to our Japan hostel interface!")),
+                          br(),
+                          br(),
+                          fluidRow(
+                            column(width = 12,
+                                   align = "center",
+                                   tags$p("On this dynamic interface, you will find details about the cost of hostels, their 
+                          location, how far they are from the city center and their rating according to multiple 
+                          criteria. You will find below the list of current variables. You will be able to adjust 
+                          the parameters to fit your needs to find the hotel or city that best suits you. 
+                          The interface is designed so that you can establish your own comparison and you will 
+                          therefore be able to obtain a wide range of graphs and statistical tables."),
+                                   tags$p("Variables :", br(),
+                                          "- Hostel_Name (name of the hotel)", br(),
+                                          "- City (city)", br(),
+                                          "- Rating_Band (categorical rating)", br(),
+                                          "- Price (price)", br(),
+                                          "- Distance (distance to the city center)", br(),
+                                          "- Summary_Score (average score)", br(),
+                                          "- Atmosphere (atmosphere score)", br(),
+                                          "- Cleanliness (score for cleanliness)", br(),
+                                          "- Facilities (score for facilities)", br(),
+                                          "- Location (score for location)", br(),
+                                          "- Security (score for security)", br(),
+                                          "- Staff (score for the staff)", br(),
+                                          "- Value_For_Money (score for value for money)", br(),
+                                          "- lon (hotel location - longitude)", br(),
+                                          "- lat (hotel location - latitude)", br()),
+                                   tags$p("You will be able to access all the information about the hostels (no missing data!), 
+                          locate them and discover them via a map. You can perform a direct search 
+                          for the city of interest using the 'Search' tab. Finally, the 'descriptive analysis' 
+                          tab allows you to make comparisons."),
+                                   br(),
+                                   br(),
+                                   tags$p("Have a good exploration !")
+                                   )
+                            )),
+                 
+                
+                 navbarMenu("Recommendation", 
+                            icon = icon("fa-regular fa-magnifying-glass",verify_fa = FALSE),
+                            
+          
+                            # Best city by variable
+                            tabPanel("Best city by variable", icon = icon("fa-solid fa-city",verify_fa = FALSE),
+                                     tabPanel("Best city by variable", headerPanel(h3("Best city by variable",align="center")),
+                                              br(),
+                                              br(),
+                                              fluidRow(
+                                                column(width = 12,
+                                                       align = "center",
+                                                       uiOutput("u_selector"),
+                                                       textOutput("best_city_max"),
+                                                       br(),
+                                                       br(),
+                                                       tags$p("Interpretation : (city name) is the best city with the highest 
+                                                     median for the variable (variable name). The median (number) is interpreted 
+                                                     as: 50% of the data is above the median and 50% is below the median.")
+                                                       )
+                                                )
+                                              )
+                                     ),
+                            
+                          
+              
+                            # Best city with cheapest hostels
+                            tabPanel("Best city with cheapest hostels", icon = icon("fa-solid fa-yen-sign",verify_fa = FALSE),
+                                     tabPanel("Best city with cheapest hostels", headerPanel(h3("Best city with cheapest hostels",align="center")),
+                                              br(),
+                                              br(),
+                                              fluidRow(
+                                                column(width = 12,
+                                                       align = "center",
+                                                       uiOutput("u_selector_1"),
+                                                       textOutput("best_city_cheapest"),
+                                                       br(),
+                                                       br(),
+                                                       tags$p("Interpretation : Fukuoka-City is the best city with the lowest median 
+                                                     for the price variable. The median is interpreted as: 50% of the data 
+                                                     is above the median and 50% is below the median. Fukuoka-City is 
+                                                     therefore the city with the most cheapest hostels. 
+                                                     Indeed, 50% of hotels are priced below 2200 yen.")
+                                                       )
+                                                )
+                                              )
+                                     ),
+                            
+#*********************************************************************************************************modif                            
+                            # Foresee the budget by City
+                            tabPanel("Foresee the budget by City", icon = icon("fa-regular fa-chart-column",verify_fa = FALSE),
+                                     tabPanel("Foresee the budget by City", headerPanel(h3("Foresee the budget by City",align="center"))), 
+                                     fluidPage(
+                                       titlePanel("Filters"),
+                                       sidebarLayout(
+                                         sidebarPanel(
+                                           selectInput(inputId = "City_foresee",label = "City",
+                                                       choices = c("Tokyo" = "tokyo",
+                                                                   "Osaka" = "osaka",
+                                                                   "Hiroshima"="hiroshima",
+                                                                   "Kyoto"="kyoto",
+                                                                   "Fukuoka-City"="fukuoka-city")
+                                                       #selected = hostel_map$City[1]
+                                           ) 
+                                         ),
+                                         mainPanel(
+                                           tabsetPanel(
+                                             tabPanel("", dataTableOutput("foresee_budget"))
+                                           )
+                                         )
+                                       )
+                                     )
+                            ),
+
+                            # show the best hostel in your favorite city by variable
+                            tabPanel("Best hostel in your favorite city by variable", icon = icon("fa-regular fa-chart-column",verify_fa = FALSE),
+                                     tabPanel("Best hostel in your favorite city by variable", headerPanel(h3("Best hostel in your favorite city by variable",align="center"))), 
+                                     fluidPage(
+                                       titlePanel("Filters"),
+                                       sidebarLayout(
+                                         sidebarPanel(
+                                           selectInput(inputId = "Var_bhic",label = "Variable",
+                                                       choices = c("No" = 0,
+                                                                   "City"= 2,
+                                                                   "Price" = 3,
+                                                                   "Distance" = 4,
+                                                                   "Summary_Score"=5,
+                                                                   "Atmosphere"=7,
+                                                                   "Cleanliness"= 8,
+                                                                   "Facilities" = 9,
+                                                                   "Location" = 10,
+                                                                   "Security"=11,
+                                                                   "Staff"=12,
+                                                                   "Value_For_Money"=13)
+                                                       #selected = hostel_map$City[1]
+                                           ),
+                                           selectInput(inputId = "Decrease_bhic",label = "Decrease",
+                                                       choices = c("Yes" = TRUE,
+                                                                   "No"= FALSE)
+                                                       #selected = hostel_map$City[1]
+                                           ),
+                                           selectInput(inputId = "City_bhic",label = "City",
+                                                       choices = c("Tokyo" = "tokyo",
+                                                                   "Osaka" = "osaka",
+                                                                   "Hiroshima"="hiroshima",
+                                                                   "Kyoto"="kyoto",
+                                                                   "Fukuoka-City"="fukuoka-city")
+                                                       #selected = hostel_map$City[1]
+                                           ) 
+                                         ),
+                                         mainPanel(
+                                           tabsetPanel(
+                                             tabPanel("", dataTableOutput("bhic"))
+                                           )
+                                         )
+                                       )
+                                     )
+                            ),
+                            # show the best hostel in your favorite city by variable
+                            tabPanel("Best hostel in your favorite city by variable", icon = icon("fa-regular fa-chart-column",verify_fa = FALSE),
+                                     tabPanel("Best hostel in your favorite city by variable", headerPanel(h3("Best hostel in your favorite city by variable",align="center"))), 
+                                     fluidPage(
+                                       titlePanel("Filters"),
+                                       sidebarLayout(
+                                         sidebarPanel(
+                                           selectInput(inputId = "data_Var_bhibc",label = "Variable",
+                                                       choices = c("No" = 0,
+                                                                   "City"= 2,
+                                                                   "Price" = 3,
+                                                                   "Summary_Score"=5,
+                                                                   "Atmosphere"=7,
+                                                                   "Cleanliness"= 8,
+                                                                   "Facilities" = 9,
+                                                                   "Location" = 10,
+                                                                   "Security"=11,
+                                                                   "Staff"=12,
+                                                                   "Value_For_Money"=13)
+                                                       #selected = hostel_map$City[1]
+                                           ),
+                                           selectInput(inputId = "Var_name_bhibc",label = "Variable name",
+                                                       choices = c("No" = "No",
+                                                                   "City"= "City",
+                                                                   "Price" = "Price",
+                                                                   "Summary_Score"="Summary_Score",
+                                                                   "Atmosphere"="Atmosphere",
+                                                                   "Cleanliness"= "Cleanliness",
+                                                                   "Facilities" = "Facilities",
+                                                                   "Location" = "Location",
+                                                                   "Security"="Security",
+                                                                   "Staff"="Staff",
+                                                                   "Value_For_Money"="Value_For_Money")
+                                                       #selected = hostel_map$City[1]
+                                           ),
+                                           selectInput(inputId = "min_bhic",label = "Min",
+                                                       choices = c("Yes" = 1,
+                                                                   "No"= 0)
+                                                       #selected = hostel_map$City[1]
+                                           ),
+                                           selectInput(inputId = "max_bhic",label = "Max",
+                                                       choices = c("Yes" = 1,
+                                                                   "No"= 0)
+                                                       #selected = hostel_map$City[1]
+                                           ),
+                                           selectInput(inputId = "All_bhic",label = "All",
+                                                       choices = c("Yes" = "TRUE",
+                                                                   "No"= "FALSE")
+                                                       #selected = hostel_map$City[1]
+                                           )
+                                         ),
+                                         mainPanel(
+                                           tabsetPanel(
+                                             tabPanel("", dataTableOutput("bhibc"))
+                                           )
+                                         )
+                                       )
+                                     )
+                            )
+
+                            
+#********************************************************************************************************************                            
+                            
+                            
+                            
+                            
+                            
+                            
+                            
+                            ),
+                                     
+
+                 navbarMenu("", 
+                            icon = icon("fa-solid fa-list-ul",verify_fa = FALSE),
+                            
+                            # Descriptive Analysis
+                            tabPanel("Descriptive Analysis", icon = icon("fa-regular fa-chart-column",verify_fa = FALSE),
+                                     tabPanel("Descriptive Analysis", headerPanel(h3("Descriptive Analysis",align="center"))),
+                                     fluidPage(
+                                       titlePanel("Filters"),
+                                       sidebarLayout(
+                                         sidebarPanel(
+                                           sliderInput(
+                                             "bins", 
+                                             label = "Number of bins:",
+                                             min = 1, 
+                                             value = 30, 
+                                             max = 50
+                                           ),
+                                           uiOutput("filter_col"),
+                                           numericInput("min", "Minimum", 0),
+                                           numericInput("max", "Maximum", 10),
+                                           sliderInput("n", "n", min = 0, max = 10, value = 1)
+                                         ),
+                                         
+                                         mainPanel(
+                                           tabsetPanel(
+                                             tabPanel("All", plotOutput("all_city"),
+                                                      plotOutput("spider")), 
+                                             # tabPanel("By city", verbatimTextOutput("price")),
+                                             tabPanel("By variable", plotOutput("price"),
+                                                      plotOutput("distance"))
+                                             )
+                                           )
+                                         )
+                                       )
+                                     ),
+                            
+                            
+                            
+                            
+                            # Map
+                            
+                            tabPanel("Map", 
+                                     icon = icon("fa-regular fa-map-location-dot",verify_fa = FALSE),
+                                     headerPanel(h3("Map of Japan",align="center")),
+                                     tags$style(type = "text/css", "#map {height: calc(90vh - 80px) !important;}"),
+                                     leafletOutput("map"),
+                                     absolutePanel(top = 250, right = 70,
+                                                   selectInput(inputId = "cities",
+                                                               label = "City",
+                                                                choices = c("All"= "All",      
+                                                                            "Tokyo" = "tokyo",
+                                                                             "Osaka" = "osaka",
+                                                                             "Hiroshima"="hiroshima",
+                                                                             "Kyoto"="kyoto",
+                                                                             "Fukuoka-City"="fukuoka-city"),
+                                                               selected = "All"),
+                                                    
+                                                   sliderInput("summary_score", "Summary Score",
+                                                               min(hostel_map$Summary_Score, na.rm = TRUE),
+                                                               max(hostel_map$Summary_Score, na.rm = TRUE),
+                                                               value = range(hostel_map$Summary_Score, na.rm = TRUE)),
+                                                   sliderInput("price", "Price",
+                                                               min(hostel_map$Price, na.rm = TRUE),
+                                                               max(hostel_map$Price, na.rm = TRUE),
+                                                               value = range(hostel_map$Price, na.rm = TRUE)),
+                                                   sliderInput("distance", "Distance",
+                                                               min(hostel_map$Distance, na.rm = TRUE),
+                                                               max(hostel_map$Distance, na.rm = TRUE),
+                                                               value = range(hostel_map$Distance, na.rm = TRUE))
+                                                   )
+                                     ),
+
+                            
+                            # Database
+                            tabPanel("Database",icon = icon("fa-regular fa-database",verify_fa = FALSE),
+                                     headerPanel(h3("Database of Japanese Hostel",align="center")),
+                                     div(DT::dataTableOutput("hostel"), style = "font-size: 65%; width: 65%")
+                                     )
+                            ),
+                 inverse=TRUE,
+                 fluid=TRUE
+                 )
+                )
+              
+
+
+
+
+
+
+server <- function(input, output, session) {
+  
+  # Recommendation 
+  
+  # Best city by variable (maximum)
+  
+  df <- reactive(var_best_city)
+  
+  output$u_selector <- renderUI({
+    df_local <- req(df())
+    selectInput("user_selected","Choose a variable",
+                choices=names(df_local),
+                selected = names(df_local)[[1]])
+  })
+  
+  
+  output$best_city_max <- renderText({
+    df_local <- req(df())
+    u_sel <- req(input$user_selected)
+    
+    best_city <- function(var,data, min, max){
+      best_city <- data %>%
+        group_by(City) %>%
+        summarise_at(vars(var), list(median = median)) %>%
+        arrange(median)
+      if (max == 1){
+        return(apply(best_city, 2, FUN=max))}
+      if (min == 1){
+        return(apply(best_city, 2, FUN=min))
+      }
+    }
+    
+    bc<-best_city(var=input$user_selected,data=hostel, min=0, max=1) 
+    bc
+    
+  })
+  
+  # Best city with cheapest hostels (min)
+  df1 <- reactive(var_cheapest)
+  
+  output$u_selector_1 <- renderUI({
+    df_local_1 <- req(df1())
+    selectInput("user_selected_1","",
+                choices=names(df_local_1),
+                selected = names(df_local_1)[[1]])
+  })
+  
+  
+  output$best_city_cheapest <- renderText({
+    df_local_1 <- req(df1())
+    u_sel_1 <- req(input$user_selected_1)
+    
+    best_city <- function(var,data, min, max){
+      best_city <- data %>%
+        group_by(City) %>%
+        summarise_at(vars(var), list(median = median)) %>%
+        arrange(median)
+      if (max == 1){
+        return(apply(best_city, 2, FUN=max))}
+      if (min == 1){
+        return(apply(best_city, 2, FUN=min))
+      }
+    }
+    
+    bc1<-best_city(var=input$user_selected_1,data=hostel, min=1, max=0) 
+    bc1
+    })
+  
+  
+  #**********************************************************************************************modif
+  #1/ foresee the budget by City : 
+  output$foresee_budget <- renderDataTable({
+    city <- input$City_foresee
+    choice_city(city=city, var='Price',data=hostel)
+  })
+  
+  
+  #2/show the best hostel in your favorite city by variable
+  output$bhic <- renderDataTable({
+    colm <- as.numeric(input$Var_bhic)
+    decrease <- input$Decrease_bhic
+    city <- input$City_bhic
+    
+    best_hostel_in_city(data=hostel, data_var=unlist(hostel[,colm]), decrease=decrease, city=city)
+  }) 
+
+  
+  #3/combine best_city and best_hostel_in_city
+  output$bhibc <- renderDataTable({
+    colm <- input$data_Var_bhibc
+    colm_n <- input$Var_name_bhibc
+    min <- input$min_bhic
+    max <- input$max_bhic
+    
+  best_hostel_in_best_city(var=colm_n, data=hostel, min=min, max=max, data_var=hostel$Price, all=TRUE)
+
+  }) 
+  
+  #*************************************************************************************************
+
+  
+  
+  # Descriptive Analysis
+  
+  # Filters
+  
+  # output$hist <- renderPlot({hist(rnorm(input$n))
+  # })
+  # 
+  # observeEvent(input$min, {
+  #   updateSliderInput(inputId = "n", min = input$min)
+  # })
+  # 
+  # observeEvent(input$max, {
+  #   updateSliderInput(inputId = "n", max = input$max)
+  # })
+  
+  output$filter_col <- renderUI({
+    tagList(
+      selectInput("select", label = h4("Variable"),
+                  names(col))
+      
+    )
+  })
+  
+  Data <- reactive({col[, c(input$select)]})
+  
+  # ALL
+  # attention ici manque rename cities + titres
+  output$all_city <- renderPlot({
+    funModeling::freq(hostel$City, plot=TRUE)
+  })
+  
+  output$spider <- renderPlot({all_spider_chart()})
+  
+  # corr_plot(data=hostel, city="all")
+  
+  # BY CITY
+  
+  
+  
+  # BY VARIABLE
+  
+   output$price <- renderPlot({
+    quant_analysis(data_var=hostel$Price[hostel$Price <= 50000],
+                   var_name='Price (without outliers)',
+                   histo=0, boxp=1, summ=0, plot=0)
+  })
+   
+   # output$price <- renderPlot({
+   #   quant_analysis(data_var=Data(),
+   #                  var_name='Data (without outliers)',
+   #                  histo=0, boxp=1, summ=0, plot=0)
+   # })
+   
+   output$distance <- renderPlot({
+     funModeling::freq(round(hostel$Distance), plot=TRUE) 
+   })
+
+   
+
+  
+  
+  
+  
+  
+  
+  
+ 
+  
+  
+  
+  
+    
+    # Show Selected Value in Console
+    observe({
+      print(input$searchme)
+    })
+    
+
+  
+  
+  
+  # Map
+
+    # Filters
+    data_react <- reactive({
+      hostel_1 <- hostel_map[which(!is.na(hostel_map$lon))]
+      if (input$cities == "All"){hostel_map}
+      else {
+      hostel_map[(hostel_map$City == input$cities) 
+             & (hostel_map$Summary_Score >= input$summary_score[1])
+             & (hostel_map$Summary_Score <= input$summary_score[2])
+             & (hostel_map$Price >= input$price[1])
+             & (hostel_map$Price <= input$price[2])
+             & (hostel_map$Distance >= input$distance[1])
+             & (hostel_map$Distance <= input$distance[2])
+             ]}
+    })
+   
+
+    
+    
+    output$map <- renderLeaflet({
+      leaflet(data=data_react()) %>%
+        #set the view for Japan 
+        setView(lng = 138.2529, lat = 36.2048, zoom = 5) %>%
+        addTiles() %>%
+        addMarkers(clusterOptions = markerClusterOptions(),
+                   lng = data_react()$lon,
+                   lat = data_react()$lat, 
+                   label = data_react()$Hostel_Name)
+    })
+    
+
+  
+    
+  # Database
+  
+  # Display database
+  output$hostel = DT::renderDataTable(hostel, 
+                                      options = list(autoWidth = FALSE), 
+                                      filter = list(position = 'top', clear = FALSE)
+                                      )
+ 
+  
+  
+  
+  
+  
+  
+  
+  
+}
+
+
+
+shinyApp(ui, server)
+
+
+
+
+
+
+
