@@ -3,7 +3,7 @@
 Link of R-shiny interface : 
 https://c217.shinyapps.io/GEFFLOT_PENICHON_MOSTAMANDY/
 
-Example of interface :
+Examples of interface :
 
 ![Map of Japan](image.png)
 
